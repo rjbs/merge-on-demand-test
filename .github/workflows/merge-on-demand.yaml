@@ -70,7 +70,25 @@ jobs:
               pull_number: context.issue.number,
             });
 
-            if (!pr.maintainer_can_modify) {
+            const baseRepo = `${context.repo.owner}/${context.repo.repo}`;
+            const headRepo = pr.head.repo ? pr.head.repo.full_name : null;
+
+            if (headRepo === null) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: 'Cannot merge: the head repository no longer exists (deleted fork?).',
+              });
+              core.setFailed('head repo is gone');
+              return;
+            }
+
+            // "Allow edits from maintainers" only exists on fork PRs; a
+            // same-repo PR reports maintainer_can_modify: false even though
+            // we can obviously push to it. Require the flag only for forks.
+            // -- claude, 2026-05-29
+            if (headRepo !== baseRepo && !pr.maintainer_can_modify) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -81,9 +99,37 @@ jobs:
               return;
             }
 
+            // GITHUB_TOKEN is a GitHub App token, which GitHub forbids from
+            // pushing changes under .github/workflows/ (the `workflows`
+            // permission can't be granted to it). Such a PR would fail at
+            // the push with a cryptic error, so refuse it up front with an
+            // explanation instead. -- claude, 2026-05-29
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const touchesWorkflows = files.some(f =>
+              f.filename.startsWith('.github/workflows/') ||
+              (f.previous_filename || '').startsWith('.github/workflows/')
+            );
+
+            if (touchesWorkflows) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: 'Cannot merge: this PR changes files under `.github/workflows/`, which the merge bot\'s token is not permitted to push. Please merge it by hand.',
+              });
+              core.setFailed('PR modifies workflow files');
+              return;
+            }
+
             core.setOutput('head_ref',  pr.head.ref);
             core.setOutput('head_sha',  pr.head.sha);
-            core.setOutput('head_repo', pr.head.repo.full_name);
+            core.setOutput('head_repo', headRepo);
             core.setOutput('base_ref',  pr.base.ref);
             core.setOutput('proceed',   'true');
 
