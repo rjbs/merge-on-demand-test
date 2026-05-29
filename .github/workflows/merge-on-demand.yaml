@@ -108,6 +108,7 @@ jobs:
           HEAD_SHA:  ${{ steps.info.outputs.head_sha }}
           HEAD_REPO: ${{ steps.info.outputs.head_repo }}
           BASE_REF:  ${{ steps.info.outputs.base_ref }}
+          PR_NUMBER: ${{ github.event.issue.number }}
         run: |
           FORK_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
 
@@ -132,8 +133,14 @@ jobs:
 
           NEW_SHA=$(git rev-parse HEAD)
 
-          git checkout "${BASE_REF}"
-          git merge --ff-only pr-branch
+          # --no-ff forces a merge commit even though the rebase made
+          # pr-branch a fast-forward of base: a semi-linear history of
+          # linear PR commits behind one merge commit that introduces no
+          # changes of its own. Reset base to the current remote tip first
+          # so the merge commit's first parent is up to date and
+          # --first-parent history stays clean. -- claude, 2026-05-29
+          git checkout -B "${BASE_REF}" "origin/${BASE_REF}"
+          git merge --no-ff -m "Merge pull request #${PR_NUMBER}" pr-branch
           MERGE_SHA=$(git rev-parse HEAD)
 
           git push origin "${BASE_REF}"
