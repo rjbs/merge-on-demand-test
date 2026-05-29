@@ -143,8 +143,17 @@ jobs:
           git merge --no-ff -m "Merge pull request #${PR_NUMBER}" pr-branch
           MERGE_SHA=$(git rev-parse HEAD)
 
-          git push origin "${BASE_REF}"
+          # Update the PR head on the fork *before* pushing base. GitHub
+          # marks a PR merged when a push to the base branch contains the
+          # PR's current head commit; if we push base while the head is
+          # still the pre-rebase SHA, that check misses and the PR stays
+          # open until some later base push. Moving the head to the rebased
+          # commits first means the base push closes it immediately. The
+          # cost is that if the base push then fails, the contributor's
+          # branch has already been rebased without a merge landing.
+          # -- claude, 2026-05-29
           git push --force "${FORK_URL}" "pr-branch:${HEAD_REF}"
+          git push origin "${BASE_REF}"
 
           echo "old_sha=${HEAD_SHA:0:12}"     >> "$GITHUB_OUTPUT"
           echo "new_sha=${NEW_SHA:0:12}"      >> "$GITHUB_OUTPUT"
